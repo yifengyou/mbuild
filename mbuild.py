@@ -373,6 +373,7 @@ def handle_clean(args):
     print(f"clean done")
 
 
+@timer
 def handle_mock(args):
     if not os.path.exists(args.workdir) or not os.path.isdir(args.workdir):
         print(f"{args.workdir} is not a valid directory")
@@ -391,11 +392,44 @@ def handle_mock(args):
         exit(1)
     srpm_path = os.path.abspath(args.srpm)
 
+    # 选择输出目录
+    if not args.output:
+        # 获取srpm名称 N-V-R
+        ret, srpm_name, stderr = do_exe_cmd(["rpm", "-qp", "--queryformat", "%{NAME}", srpm_path], print_output=True)
+        if ret != 0:
+            logger.error(f" query srpm file ret is not zero [{ret}] {stderr}")
+            return
+        srpm_name = srpm_name.strip()
+        logger.info(f"srpm name : [{srpm_name}]")
+
+        # 创建构建目录
+        topdir = os.path.dirname(srpm_path)
+        output_dir = os.path.join(topdir, srpm_name)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+        logger.info(f"output_dir dir : {output_dir}")
+    else:
+        try:
+            os.makedirs(args.output, exist_ok=True)
+        except Exception as e:
+            logger.error(f"failed to create {args.output}")
+            exit(1)
+        output_dir = args.output
+
+    if not args.root:
+        root = "rocky-8-x86_64"
+    else:
+        root = args.root
+
     # mock编译
-    ret, stdout, stderr = do_exe_cmd(
-        ["/usr/bin/mock", "-r", f"rocky-8-x86_64", "--rebuild", f"{srpm_path}"],
-        print_output=True
-    )
+    cmd = [
+        "/usr/bin/mock",
+        "--root", f"{root}",
+        "--rebuild", f"{srpm_path}",
+        "--resultdir", f"{output_dir}"
+    ]
+    logger.info(f"run cmd {' '.join(cmd)}")
+    ret, stdout, stderr = do_exe_cmd(cmd, print_output=True, shell=False)
     if ret != 0:
         # logger.error(f" rpmbuild failed! [{ret}] {stderr}")
         errorlog = os.path.join(workdir, "mbuild_mock_err.log_" + timestamp)
@@ -432,11 +466,12 @@ def main():
     parent_parser = argparse.ArgumentParser(add_help=False, description="mbuild - a tool for kernel development")
     parent_parser.add_argument("-V", "--verbose", default=None, action="store_true", help="show verbose output")
     parent_parser.add_argument("-j", "--job", default=os.cpu_count(), type=int, help="job count")
-    parent_parser.add_argument("-o", "--output", default="mbuild.db", help="mbuild database file path")
+    parent_parser.add_argument("-o", "--output", default=None, help="output dir path")
     parent_parser.add_argument("-w", "--workdir", default=".", help="setup workdir")
     parent_parser.add_argument('-l', '--log', default=None, help="log file path")
     parent_parser.add_argument('-d', '--debug', default=None, action="store_true", help="enable debug output")
     parent_parser.add_argument('-s', '--srpm', default=None, help="build specific srpm")
+    parent_parser.add_argument('-r', '--root', default=None, help="specific mock config")
     parent_parser.add_argument('-q', '--quiet', default=False, action="store_true", help="keep quiet, no msg send")
 
     # 添加子命令 stat
