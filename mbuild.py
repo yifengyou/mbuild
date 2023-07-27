@@ -33,7 +33,7 @@ def timer(func):
         result = func(*args, **kwargs)
         end = time.time()
         elapsed = end - start
-        logger.info(f"{func.__name__} took {elapsed} seconds to run")
+        logger.info(f"{func.__name__} took {elapsed} seconds")
         return result
 
     return wrapper
@@ -156,11 +156,11 @@ def build_per_srpm(srpm):
     mbuilddir = os.path.join(topdir, srpm_name)
     if not os.path.exists(mbuilddir):
         os.makedirs(mbuilddir, exist_ok=True)
-    logger.info(f" mbuild dir : {mbuilddir}")
+    logger.info(f"mbuild dir : {mbuilddir}")
     rpmbuilddir = os.path.join(mbuilddir, "rpmbuild_" + timestamp)
     if not os.path.exists(mbuilddir):
         os.makedirs(rpmbuilddir, exist_ok=True)
-    logger.info(f" rpmbuild dir : {rpmbuilddir}")
+    logger.info(f"rpmbuild dir : {rpmbuilddir}")
 
     ret, stdout, stderr = do_exe_cmd(
         ["rpm", "-ivh", "--define", f"_topdir {rpmbuilddir}", f"{srpm}"],
@@ -168,7 +168,7 @@ def build_per_srpm(srpm):
     )
     if ret != 0:
         # logger.error(f" install srpm {srpm} to {rpmbuilddir} failed! [{ret}] {stderr}")
-        errorlog = os.path.join(mbuilddir, "srpminstall-error.log_" + timestamp)
+        errorlog = os.path.join(mbuilddir, "mbuild_srpminstall_err.log_" + timestamp)
         with open(errorlog, 'w') as fd:
             fd.write(stdout)
             fd.write(stderr)
@@ -182,18 +182,18 @@ def build_per_srpm(srpm):
         logger.error(f"found spec more than one [{len(specs)}]")
         return
     spec = os.path.abspath(specs[0])
-    logger.info(f" using spec {spec}")
+    logger.info(f"using spec {spec}")
 
     # 导出rpm -qa记录
     ret, stdout, stderr = do_exe_cmd(["rpm", "-qa"], print_output=False)
     if ret != 0:
         # logger.error(f" query all rpm failed! [{ret}] {stderr}")
-        errorlog = os.path.join(mbuilddir, "rpmqa-error.log_" + timestamp)
+        errorlog = os.path.join(mbuilddir, "mbuild_rpmqa_err.log_" + timestamp)
         with open(errorlog, 'w') as fd:
             fd.write(stdout)
             fd.write(stderr)
         return
-    rpm_manifest = os.path.join(mbuilddir, "rpm-manifest_" + timestamp)
+    rpm_manifest = os.path.join(mbuilddir, "mbuild_rpm-manifest_" + timestamp)
     with open(rpm_manifest, 'w') as fd:
         fd.write(stdout)
 
@@ -201,12 +201,12 @@ def build_per_srpm(srpm):
     ret, stdout, stderr = do_exe_cmd(["yum", "builddep", "-y", spec], print_output=True)
     if ret != 0:
         # logger.error(f" yum builddep failed! [{ret}] {stderr}")
-        errorlog = os.path.join(mbuilddir, "builddep-error.log_" + timestamp)
+        errorlog = os.path.join(mbuilddir, "mbuild_builddep_err.log_" + timestamp)
         with open(errorlog, 'w') as fd:
             fd.write(stdout)
             fd.write(stderr)
         return
-    buildlog = os.path.join(mbuilddir, "builddep.log_" + timestamp)
+    buildlog = os.path.join(mbuilddir, "mbuild_builddep.log_" + timestamp)
     with open(buildlog, 'w') as fd:
         fd.write(stdout)
 
@@ -216,12 +216,12 @@ def build_per_srpm(srpm):
         print_output=True)
     if ret != 0:
         # logger.error(f" rpmbuild failed! [{ret}] {stderr}")
-        errorlog = os.path.join(mbuilddir, "build-error.log_" + timestamp)
+        errorlog = os.path.join(mbuilddir, "mbuild_build_err.log_" + timestamp)
         with open(errorlog, 'w') as fd:
             fd.write(stdout)
             fd.write(stderr)
         return
-    buildlog = os.path.join(mbuilddir, "rpmbuild.log_" + timestamp)
+    buildlog = os.path.join(mbuilddir, "mbuild_rpmbuild.log_" + timestamp)
     with open(buildlog, 'w') as fd:
         fd.write(stdout)
 
@@ -234,7 +234,7 @@ def handle_build(args):
 
     workdir = os.path.abspath(args.workdir)
     init_logger(args)
-    logger.info(f" workdir: {workdir}")
+    logger.info(f"workdir: {workdir}")
 
     if args.srpm:
         if not os.path.exists(args.srpm) or not os.path.isfile(args.srpm):
@@ -270,11 +270,10 @@ def handle_localinstall(args):
 
     workdir = os.path.abspath(args.workdir)
     init_logger(args)
-    logger.info(f" workdir: {workdir}")
+    logger.info(f"workdir: {workdir}")
 
     if not args.srpm:
         logger.error(f" must specific target srpm")
-
 
     if not os.path.exists(args.srpm) or not os.path.isfile(args.srpm):
         logger.error(f"{args.srpm} is not a valid srpm file")
@@ -287,7 +286,7 @@ def handle_localinstall(args):
     )
     if ret != 0:
         # logger.error(f" install srpm {srpm} to {rpmbuilddir} failed! [{ret}] {stderr}")
-        errorlog = os.path.join(workdir, "srpminstall-error.log_" + timestamp)
+        errorlog = os.path.join(workdir, "mbuild_srpminstall_err.log_" + timestamp)
         with open(errorlog, 'w') as fd:
             fd.write(stdout)
             fd.write(stderr)
@@ -312,7 +311,7 @@ def handle_localbuild(args):
 
     workdir = os.path.abspath(args.workdir)
     init_logger(args)
-    logger.info(f" workdir: {workdir}")
+    logger.info(f"workdir: {workdir}")
 
     if not os.path.exists(os.path.join(workdir, "SOURCES")) or not os.path.exists(os.path.join(workdir, "SPECS")):
         logger.error(f"No SOURCES or SPECS dir found in {workdir}")
@@ -327,7 +326,7 @@ def handle_localbuild(args):
         logger.error(f"found spec more than one [{len(specs)}]")
         return
     spec = os.path.abspath(specs[0])
-    logger.info(f" using spec {spec}")
+    logger.info(f"using spec {spec}")
 
     # rpmbuild编译
     ret, stdout, stderr = do_exe_cmd(
@@ -336,12 +335,12 @@ def handle_localbuild(args):
     )
     if ret != 0:
         # logger.error(f" rpmbuild failed! [{ret}] {stderr}")
-        errorlog = os.path.join(workdir, "build-error.log_" + timestamp)
+        errorlog = os.path.join(workdir, "mbuild_build_err.log_" + timestamp)
         with open(errorlog, 'w') as fd:
             fd.write(stdout)
             fd.write(stderr)
         return
-    buildlog = os.path.join(workdir, "rpmbuild.log_" + timestamp)
+    buildlog = os.path.join(workdir, "mbuild_rpmbuild.log_" + timestamp)
     with open(buildlog, 'w') as fd:
         fd.write(stdout)
 
@@ -354,26 +353,67 @@ def handle_localbuild(args):
         msg_sender.send_markdown(msg=format_msg)
 
 
-@timer
 def handle_clean(args):
     if not os.path.exists(args.workdir) or not os.path.isdir(args.workdir):
         print(f"{args.workdir} is not a valid directory")
         exit(1)
 
     workdir = os.path.abspath(args.workdir)
-    init_logger(args)
-    logger.info(f" workdir: {workdir}")
+    print(f"workdir: {workdir}")
 
     # 检查spec
-    specs = glob.glob(f"{workdir}/SPECS/*.spec")
-    if len(specs) == 0:
-        logger.error(f"no specs found!")
+    logs = glob.glob(f"{workdir}/mbuild_*")
+    if len(logs) == 0:
+        print(f"no mbuild log found! bye~")
         return
-    elif len(specs) > 1:
-        logger.error(f"found spec more than one [{len(specs)}]")
+    for l in logs:
+        if os.path.isfile(l):
+            os.remove(l)
+            print(f"delete {l} done!")
+    print(f"clean done")
+
+
+def handle_mock(args):
+    if not os.path.exists(args.workdir) or not os.path.isdir(args.workdir):
+        print(f"{args.workdir} is not a valid directory")
+        exit(1)
+
+    workdir = os.path.abspath(args.workdir)
+    init_logger(args)
+    logger.info(f"workdir: {workdir}")
+
+    if not args.srpm:
+        logger.error(f" must specific target srpm")
+        exit(1)
+
+    if not os.path.exists(args.srpm) or not os.path.isfile(args.srpm):
+        logger.error(f"{args.srpm} is not a valid srpm file")
+        exit(1)
+    srpm_path = os.path.abspath(args.srpm)
+
+    # mock编译
+    ret, stdout, stderr = do_exe_cmd(
+        ["/usr/bin/mock", "-r", f"rocky-8-x86_64", "--rebuild", f"{srpm_path}"],
+        print_output=True
+    )
+    if ret != 0:
+        # logger.error(f" rpmbuild failed! [{ret}] {stderr}")
+        errorlog = os.path.join(workdir, "mbuild_mock_err.log_" + timestamp)
+        with open(errorlog, 'w') as fd:
+            fd.write(stdout)
+            fd.write(stderr)
         return
-    spec = os.path.abspath(specs[0])
-    logger.info(f" using spec {spec}")
+    buildlog = os.path.join(workdir, "mbuild_mock.log_" + timestamp)
+    with open(buildlog, 'w') as fd:
+        fd.write(stdout)
+
+    if not args.quiet:
+        msg_sender = Wecom(key=msg_token)
+        format_msg = f"# mbuild消息播报:\n" \
+                     f"命令 : <font color=\"warning\">{' '.join(sys.argv)}</font>\n" \
+                     f"开始时间 : {timestamp}\n" \
+                     f"结束时间 : {datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
+        msg_sender.send_markdown(msg=format_msg)
 
 
 def main():
@@ -414,6 +454,10 @@ def main():
     # 添加子命令 localbuild
     parser_localbuild = subparsers.add_parser('localbuild', parents=[parent_parser])
     parser_localbuild.set_defaults(func=handle_localbuild)
+
+    # 添加子命令 handle_mock
+    parser_mock = subparsers.add_parser('mock', parents=[parent_parser])
+    parser_mock.set_defaults(func=handle_mock)
 
     # 添加子命令 clean
     parser_clean = subparsers.add_parser('clean', parents=[parent_parser])
