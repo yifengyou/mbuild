@@ -9,6 +9,7 @@
 import argparse
 import datetime
 import glob
+import json
 import logging
 import os
 import os.path
@@ -17,11 +18,13 @@ import sys
 import time
 from logging.handlers import RotatingFileHandler
 
+import requests
 import select
 
 CURRENT_VERSION = "0.1.0"
 logger = None
 timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+msg_token = "4155d89f-0b1c-44a8-8411-4f40c1d95795"
 
 
 def timer(func):
@@ -34,6 +37,41 @@ def timer(func):
         return result
 
     return wrapper
+
+
+class Wecom():
+    """
+    企业微信群聊机器人，官方文档：https://developer.work.weixin.qq.com/document/path/91770
+    """
+
+    def __init__(self, key=None):
+        if key is None:
+            raise Exception(" wecom api key is None ")
+        self._key = key
+
+    def do_send(self, data):
+        res = None
+        headers = {'Content-Type': 'application/json'}
+        url = f'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={self._key}'
+        r = requests.post(url=url, headers=headers, data=json.dumps(data))
+        try:
+            res = json.loads(r.text)
+        except:
+            pass
+        if r.status_code == 200 and res and 'errcode' in res and 0 == res['errcode']:
+            logger.info('* wecomBot send msg success')
+        else:
+            logger.info('* wecomBot send msg failed!')
+            logger.info(r.text)
+
+    def send_markdown(self, msg):
+        data = {
+            "msgtype": "markdown",
+            "markdown": {
+                "content": msg,
+            },
+        }
+        self.do_send(data)
 
 
 def init_logger(args):
@@ -106,7 +144,7 @@ def handle_stat(args):
 
 def build_per_srpm(srpm):
     # 获取srpm名称 N-V-R
-    ret, srpm_name, stderr = do_exe_cmd(["rpm", "-qp", "--queryformat", "%{NAME}", srpm], print_output=False)
+    ret, srpm_name, stderr = do_exe_cmd(["rpm", "-qp", "--queryformat", "%{NAME}", srpm], print_output=True)
     if ret != 0:
         logger.error(f" query srpm file ret is not zero [{ret}] {stderr}")
         return
@@ -126,12 +164,15 @@ def build_per_srpm(srpm):
 
     ret, stdout, stderr = do_exe_cmd(
         ["rpm", "-ivh", "--define", f"_topdir {rpmbuilddir}", f"{srpm}"],
-        print_output=False
+        print_output=True
     )
     if ret != 0:
-        logger.error(f" install srpm {srpm} to {rpmbuilddir} failed! [{ret}] {stderr}")
+        # logger.error(f" install srpm {srpm} to {rpmbuilddir} failed! [{ret}] {stderr}")
+        errorlog = os.path.join(mbuilddir, "srpminstall-error.log_" + timestamp)
+        with open(errorlog, 'w') as fd:
+            fd.write(stdout)
+            fd.write(stderr)
         return
-
     # 检查spec
     specs = glob.glob(f"{rpmbuilddir}/SPECS/*.spec")
     if len(specs) == 0:
@@ -146,25 +187,20 @@ def build_per_srpm(srpm):
     # 导出rpm -qa记录
     ret, stdout, stderr = do_exe_cmd(["rpm", "-qa"], print_output=False)
     if ret != 0:
-        logger.error(f" query all rpm failed! [{ret}] {stderr}")
-        return
-    rpm_manifest = os.path.join(mbuilddir, "rpm-manifest_" + timestamp)
-    with open(rpm_manifest, 'w') as fd:
-        fd.write(stdout)
-
-    # 导出rpm -qa记录
-    ret, stdout, stderr = do_exe_cmd(["rpm", "-qa"], print_output=False)
-    if ret != 0:
-        logger.error(f" query all rpm failed! [{ret}] {stderr}")
+        # logger.error(f" query all rpm failed! [{ret}] {stderr}")
+        errorlog = os.path.join(mbuilddir, "rpmqa-error.log_" + timestamp)
+        with open(errorlog, 'w') as fd:
+            fd.write(stdout)
+            fd.write(stderr)
         return
     rpm_manifest = os.path.join(mbuilddir, "rpm-manifest_" + timestamp)
     with open(rpm_manifest, 'w') as fd:
         fd.write(stdout)
 
     # 安裝依赖
-    ret, stdout, stderr = do_exe_cmd(["yum", "builddep", "-y", spec], print_output=False)
+    ret, stdout, stderr = do_exe_cmd(["yum", "builddep", "-y", spec], print_output=True)
     if ret != 0:
-        logger.error(f" yum builddep failed! [{ret}] {stderr}")
+        # logger.error(f" yum builddep failed! [{ret}] {stderr}")
         errorlog = os.path.join(mbuilddir, "builddep-error.log_" + timestamp)
         with open(errorlog, 'w') as fd:
             fd.write(stdout)
@@ -217,6 +253,56 @@ def handle_build(args):
             logger.info(f"[{index + 1}/{total}] build {srpm}")
             build_per_srpm(srpm_path)
 
+    if not args.quiet:
+        msg_sender = Wecom(key=msg_token)
+        format_msg = f"# mbuild消息播报:\n" \
+                     f"命令 : <font color=\"warning\">{' '.join(sys.argv)}</font>\n" \
+                     f"开始时间 : {timestamp}\n" \
+                     f"结束时间 : {datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
+        msg_sender.send_markdown(msg=format_msg)
+
+
+@timer
+def handle_localinstall(args):
+    if not os.path.exists(args.workdir) or not os.path.isdir(args.workdir):
+        print(f"{args.workdir} is not a valid directory")
+        exit(1)
+
+    workdir = os.path.abspath(args.workdir)
+    init_logger(args)
+    logger.info(f" workdir: {workdir}")
+
+    if not args.srpm:
+        logger.error(f" must specific target srpm")
+
+
+    if not os.path.exists(args.srpm) or not os.path.isfile(args.srpm):
+        logger.error(f"{args.srpm} is not a valid srpm file")
+        exit(1)
+    srpm_path = os.path.abspath(args.srpm)
+
+    ret, stdout, stderr = do_exe_cmd(
+        ["rpm", "-ivh", "--define", f"_topdir {workdir}", f"{srpm_path}"],
+        print_output=True
+    )
+    if ret != 0:
+        # logger.error(f" install srpm {srpm} to {rpmbuilddir} failed! [{ret}] {stderr}")
+        errorlog = os.path.join(workdir, "srpminstall-error.log_" + timestamp)
+        with open(errorlog, 'w') as fd:
+            fd.write(stdout)
+            fd.write(stderr)
+        return
+    else:
+        logger.info(f"localinstall {srpm_path} success!")
+
+    if not args.quiet:
+        msg_sender = Wecom(key=msg_token)
+        format_msg = f"# mbuild消息播报:\n" \
+                     f"命令 : <font color=\"warning\">{' '.join(sys.argv)}</font>\n" \
+                     f"开始时间 : {timestamp}\n" \
+                     f"结束时间 : {datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
+        msg_sender.send_markdown(msg=format_msg)
+
 
 @timer
 def handle_localbuild(args):
@@ -258,6 +344,14 @@ def handle_localbuild(args):
     buildlog = os.path.join(workdir, "rpmbuild.log_" + timestamp)
     with open(buildlog, 'w') as fd:
         fd.write(stdout)
+
+    if not args.quiet:
+        msg_sender = Wecom(key=msg_token)
+        format_msg = f"# mbuild消息播报:\n" \
+                     f"命令 : <font color=\"warning\">{' '.join(sys.argv)}</font>\n" \
+                     f"开始时间 : {timestamp}\n" \
+                     f"结束时间 : {datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
+        msg_sender.send_markdown(msg=format_msg)
 
 
 @timer
@@ -303,6 +397,7 @@ def main():
     parent_parser.add_argument('-l', '--log', default=None, help="log file path")
     parent_parser.add_argument('-d', '--debug', default=None, action="store_true", help="enable debug output")
     parent_parser.add_argument('-s', '--srpm', default=None, help="build specific srpm")
+    parent_parser.add_argument('-q', '--quiet', default=False, action="store_true", help="keep quiet, no msg send")
 
     # 添加子命令 stat
     parser_stat = subparsers.add_parser('stat', parents=[parent_parser])
@@ -311,6 +406,10 @@ def main():
     # 添加子命令 build
     parser_build = subparsers.add_parser('build', parents=[parent_parser])
     parser_build.set_defaults(func=handle_build)
+
+    # 添加子命令 localinstall
+    parser_localinstall = subparsers.add_parser('localinstall', parents=[parent_parser])
+    parser_localinstall.set_defaults(func=handle_localinstall)
 
     # 添加子命令 localbuild
     parser_localbuild = subparsers.add_parser('localbuild', parents=[parent_parser])
