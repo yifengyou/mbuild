@@ -21,6 +21,7 @@ import select
 
 CURRENT_VERSION = "0.1.0"
 logger = None
+timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
 
 
 def timer(func):
@@ -35,16 +36,24 @@ def timer(func):
     return wrapper
 
 
-def beijing_timestamp():
-    utc_time = datetime.datetime.utcnow()
-    beijing_tz = datetime.timezone(datetime.timedelta(hours=8))
-    beijing_time = utc_time.astimezone(beijing_tz)
-    return beijing_time.strftime("%Y/%m/%d %H:%M:%S")
-
-
-def perror(str):
-    print("Error: ", str)
-    sys.exit(1)
+def init_logger(args):
+    global logger, timestamp
+    logger = logging.getLogger("mbuild")
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
+    logger.addHandler(console_handler)
+    logfile = os.path.join(args.workdir,
+                           "mbuild_" + timestamp
+                           )
+    file_handler = RotatingFileHandler(
+        filename=logfile,
+        encoding='UTF-8',
+        maxBytes=1024000,
+        backupCount=10
+    )
+    file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
+    logger.addHandler(file_handler)
+    logger.setLevel(logging.INFO)
 
 
 def check_python_version():
@@ -96,8 +105,6 @@ def handle_stat(args):
 
 
 def build_per_srpm(srpm):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
-
     # 获取srpm名称 N-V-R
     ret, srpm_name, stderr = do_exe_cmd(["rpm", "-qp", "--queryformat", "%{NAME}", srpm], print_output=False)
     if ret != 0:
@@ -170,9 +177,9 @@ def build_per_srpm(srpm):
     # rpmbuild编译
     ret, stdout, stderr = do_exe_cmd(
         ["rpmbuild", "--define", f"_topdir {rpmbuilddir}", "-ba", f"{spec}", "--nocheck"],
-        print_output=False)
+        print_output=True)
     if ret != 0:
-        logger.error(f" rpmbuild failed! [{ret}] {stderr}")
+        # logger.error(f" rpmbuild failed! [{ret}] {stderr}")
         errorlog = os.path.join(mbuilddir, "build-error.log_" + timestamp)
         with open(errorlog, 'w') as fd:
             fd.write(stdout)
@@ -185,46 +192,24 @@ def build_per_srpm(srpm):
 
 @timer
 def handle_build(args):
-    global logger
-    begin_time = beijing_timestamp()
-
     if not os.path.exists(args.workdir) or not os.path.isdir(args.workdir):
         print(f"{args.workdir} is not a valid directory")
         exit(1)
 
     workdir = os.path.abspath(args.workdir)
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
-
-    logger = logging.getLogger("mbuild")
-    console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
-    logger.addHandler(console_handler)
-    logfile = os.path.join(args.workdir,
-                           "mbuild_" + timestamp
-                           )
-    file_handler = RotatingFileHandler(
-        filename=logfile,
-        encoding='UTF-8',
-        maxBytes=1024000,
-        backupCount=10
-    )
-    file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
-    logger.addHandler(file_handler)
-
-    logger.setLevel(logging.INFO)
-
+    init_logger(args)
     logger.info(f" workdir: {workdir}")
 
     if args.srpm:
         if not os.path.exists(args.srpm) or not os.path.isfile(args.srpm):
-            print(f"{args.srpm} is not a valid srpm file")
+            logger.error(f"{args.srpm} is not a valid srpm file")
             exit(1)
         srpm_path = os.path.abspath(args.srpm)
         build_per_srpm(srpm_path)
     else:
         srpms = glob.glob(f"{args.workdir}/*.src.rpm")
         if not srpms:
-            print(f"No src.rpm found in {args.workdir}")
+            logger.error(f"No src.rpm found in {args.workdir}")
             exit(1)
         total = len(srpms)
         for index, srpm in enumerate(srpms):
@@ -235,34 +220,12 @@ def handle_build(args):
 
 @timer
 def handle_localbuild(args):
-    global logger
-    begin_time = beijing_timestamp()
-
     if not os.path.exists(args.workdir) or not os.path.isdir(args.workdir):
         print(f"{args.workdir} is not a valid directory")
         exit(1)
 
     workdir = os.path.abspath(args.workdir)
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
-
-    logger = logging.getLogger("mbuild")
-    console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
-    logger.addHandler(console_handler)
-    logfile = os.path.join(args.workdir,
-                           "mbuild_" + timestamp
-                           )
-    file_handler = RotatingFileHandler(
-        filename=logfile,
-        encoding='UTF-8',
-        maxBytes=1024000,
-        backupCount=10
-    )
-    file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
-    logger.addHandler(file_handler)
-
-    logger.setLevel(logging.INFO)
-
+    init_logger(args)
     logger.info(f" workdir: {workdir}")
 
     if not os.path.exists(os.path.join(workdir, "SOURCES")) or not os.path.exists(os.path.join(workdir, "SPECS")):
@@ -283,9 +246,10 @@ def handle_localbuild(args):
     # rpmbuild编译
     ret, stdout, stderr = do_exe_cmd(
         ["rpmbuild", "--define", f"_topdir {workdir}", "-ba", f"{spec}", "--nocheck"],
-        print_output=False)
+        print_output=True
+    )
     if ret != 0:
-        logger.error(f" rpmbuild failed! [{ret}] {stderr}")
+        # logger.error(f" rpmbuild failed! [{ret}] {stderr}")
         errorlog = os.path.join(workdir, "build-error.log_" + timestamp)
         with open(errorlog, 'w') as fd:
             fd.write(stdout)
@@ -294,6 +258,28 @@ def handle_localbuild(args):
     buildlog = os.path.join(workdir, "rpmbuild.log_" + timestamp)
     with open(buildlog, 'w') as fd:
         fd.write(stdout)
+
+
+@timer
+def handle_clean(args):
+    if not os.path.exists(args.workdir) or not os.path.isdir(args.workdir):
+        print(f"{args.workdir} is not a valid directory")
+        exit(1)
+
+    workdir = os.path.abspath(args.workdir)
+    init_logger(args)
+    logger.info(f" workdir: {workdir}")
+
+    # 检查spec
+    specs = glob.glob(f"{workdir}/SPECS/*.spec")
+    if len(specs) == 0:
+        logger.error(f"no specs found!")
+        return
+    elif len(specs) > 1:
+        logger.error(f"found spec more than one [{len(specs)}]")
+        return
+    spec = os.path.abspath(specs[0])
+    logger.info(f" using spec {spec}")
 
 
 def main():
@@ -329,6 +315,10 @@ def main():
     # 添加子命令 localbuild
     parser_localbuild = subparsers.add_parser('localbuild', parents=[parent_parser])
     parser_localbuild.set_defaults(func=handle_localbuild)
+
+    # 添加子命令 clean
+    parser_clean = subparsers.add_parser('clean', parents=[parent_parser])
+    parser_clean.set_defaults(func=handle_clean)
 
     # 开始解析命令
     args = parser.parse_args()
