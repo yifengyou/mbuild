@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import os.path
+import re
 import subprocess
 import sys
 import time
@@ -123,16 +124,17 @@ def do_exe_cmd(cmd, print_output=False, shell=False):
             line = f.readline().decode('utf-8').strip()
             # 如果有内容，判断是stdout还是stderr，并打印到屏幕，并刷新缓冲区
             if line:
-                if f == p.stdout:
-                    if print_output == True:
-                        print("STDOUT", line)
-                    stdout_output += line + '\n'
-                    sys.stdout.flush()
-                elif f == p.stderr:
-                    if print_output == True:
-                        print("STDERR", line)
-                    stderr_output += line + '\n'
-                    sys.stderr.flush()
+                print("STD", line)
+                # if f == p.stdout:
+                #     if print_output == True:
+                #         print("STDOUT", line)
+                #     stdout_output += line + '\n'
+                #     sys.stdout.flush()
+                # elif f == p.stderr:
+                #     if print_output == True:
+                #         print("STDERR", line)
+                #     stderr_output += line + '\n'
+                #     sys.stderr.flush()
         if p.poll() is not None:
             break
     return p.returncode, stdout_output, stderr_output
@@ -547,6 +549,26 @@ def main():
 
     # 开始解析命令
     args = parser.parse_args()
+
+    # 解析命令后解析配置文件，合并两者
+    for filename in os.listdir('.'):
+        if filename.endswith(".mbuild"):
+            print("load config file %s" % filename)
+            with open(filename, 'r', encoding='utf8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    match = re.match(r'(\w+)\s*=\s*([\w/.-]+)', line)
+                    if match:
+                        key = match.group(1)
+                        value = match.group(2)
+                        # 如果命令行没有定义key，则使用配置中的KV
+                        if not hasattr(args, key):
+                            setattr(args, key, value)
+                        # 如果命令行未打开选项，但配置中打开，则使用配置中的KV
+                        if getattr(args, key) is None:
+                            setattr(args, key, value)
 
     if args.version:
         print("mbuild %s" % CURRENT_VERSION)
