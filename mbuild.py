@@ -124,17 +124,18 @@ def do_exe_cmd(cmd, print_output=False, shell=False):
             line = f.readline().decode('utf-8').strip()
             # 如果有内容，判断是stdout还是stderr，并打印到屏幕，并刷新缓冲区
             if line:
-                print("STD", line)
-                # if f == p.stdout:
-                #     if print_output == True:
-                #         print("STDOUT", line)
-                #     stdout_output += line + '\n'
-                #     sys.stdout.flush()
-                # elif f == p.stderr:
-                #     if print_output == True:
-                #         print("STDERR", line)
-                #     stderr_output += line + '\n'
-                #     sys.stderr.flush()
+                if f == p.stdout:
+                    if print_output == True:
+                        print("STDOUT", line)
+                    stdout_output += line + '\n'
+                    sys.stdout.flush()
+                elif f == p.stderr:
+                    if print_output == True:
+                        print("STDERR", line)
+                    stderr_output += line + '\n'
+                    sys.stderr.flush()
+                else:
+                    print("UNKOWN:", line)
         if p.poll() is not None:
             break
     return p.returncode, stdout_output, stderr_output
@@ -441,10 +442,14 @@ def handle_mock(args):
         exit(1)
     srpm_path = os.path.abspath(args.srpm)
 
+    print(f"args.output {args.output} {srpm_path}")
     # 选择输出目录
     if not args.output:
         # 获取srpm名称 N-V-R
-        ret, srpm_name, stderr = do_exe_cmd(["rpm", "-qp", "--queryformat", "%{NAME}", srpm_path], print_output=True)
+        ret, srpm_name, stderr = do_exe_cmd(
+            ["rpm", "-qp", "--nosignature", "--nodigest", "--queryformat", "%{NAME}", srpm_path],
+            print_output=False
+        )
         if ret != 0:
             msg = f" query srpm file ret is not zero [{ret}] {stderr}"
             logger.error(msg)
@@ -479,7 +484,8 @@ def handle_mock(args):
         "/usr/bin/mock",
         "--root", f"{root}",
         "--rebuild", f"{srpm_path}",
-        "--resultdir", f"{output_dir}"
+        "--resultdir", f"{output_dir}",
+        "--verbose", "--trace"
     ]
     logger.info(f"run cmd {' '.join(cmd)}")
     ret, stdout, stderr = do_exe_cmd(cmd, print_output=True, shell=False)
