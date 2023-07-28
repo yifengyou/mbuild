@@ -141,7 +141,7 @@ def do_exe_cmd(cmd, print_output=False, shell=False):
     return p.returncode, stdout_output, stderr_output
 
 
-def do_sendmsg(args, ret=0, stdout="", stderr=""):
+def do_sendmsg(args, ret=0, stdout="", stderr="", extra=""):
     if not args.quiet:
         msg_sender = Wecom(key=msg_token)
         format_msg = f"# mbuild消息播报:\n" \
@@ -149,6 +149,7 @@ def do_sendmsg(args, ret=0, stdout="", stderr=""):
                      f"返回值 : {ret}\n" \
                      f"输出 : {stdout}\n" \
                      f"错误 : {stderr}\n" \
+                     f"附加 : {extra}\n" \
                      f"开始时间 : {timestamp}\n" \
                      f"结束时间 : {datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
         msg_sender.send_markdown(msg=format_msg)
@@ -158,7 +159,7 @@ def handle_stat(args):
     pass
 
 
-def build_per_srpm(srpm):
+def rpmbuild_per_srpm(srpm):
     # 获取srpm名称 N-V-R
     ret, srpm_name, stderr = do_exe_cmd(["rpm", "-qp", "--queryformat", "%{NAME}", srpm], print_output=True)
     if ret != 0:
@@ -257,7 +258,7 @@ def handle_build(args):
             logger.error(f"{args.srpm} is not a valid srpm file")
             exit(1)
         srpm_path = os.path.abspath(args.srpm)
-        build_per_srpm(srpm_path)
+        rpmbuild_per_srpm(srpm_path)
     else:
         srpms = glob.glob(f"{args.workdir}/*.src.rpm")
         if not srpms:
@@ -267,7 +268,7 @@ def handle_build(args):
         for index, srpm in enumerate(srpms):
             srpm_path = os.path.abspath(srpm)
             logger.info(f"[{index + 1}/{total}] build {srpm}")
-            build_per_srpm(srpm_path)
+            rpmbuild_per_srpm(srpm_path)
 
     if not args.quiet:
         msg_sender = Wecom(key=msg_token)
@@ -423,26 +424,9 @@ def handle_clean(args):
     print(f"clean done")
 
 
-@timer
-def handle_mock(args):
-    if not os.path.exists(args.workdir) or not os.path.isdir(args.workdir):
-        print(f"{args.workdir} is not a valid directory")
-        exit(1)
+def mockbuild_per_srpm(args, srpm):
+    srpm_path = os.path.abspath(srpm)
 
-    workdir = os.path.abspath(args.workdir)
-    init_logger(args)
-    logger.info(f"workdir: {workdir}")
-
-    if not args.srpm:
-        logger.error(f" must specific target srpm")
-        exit(1)
-
-    if not os.path.exists(args.srpm) or not os.path.isfile(args.srpm):
-        logger.error(f"{args.srpm} is not a valid srpm file")
-        exit(1)
-    srpm_path = os.path.abspath(args.srpm)
-
-    print(f"args.output {args.output} {srpm_path}")
     # 选择输出目录
     if not args.output:
         # 获取srpm名称 N-V-R
@@ -491,16 +475,44 @@ def handle_mock(args):
     ret, stdout, stderr = do_exe_cmd(cmd, print_output=True, shell=False)
     if ret != 0:
         # logger.error(f" rpmbuild failed! [{ret}] {stderr}")
-        errorlog = os.path.join(workdir, "mbuild_mock_err.log_" + timestamp)
+        errorlog = os.path.join(output_dir, "mbuild_mock_err.log_" + timestamp)
         with open(errorlog, 'w') as fd:
             fd.write(stdout)
             fd.write(stderr)
         do_sendmsg(args, ret=ret)
         return
-    buildlog = os.path.join(workdir, "mbuild_mock.log_" + timestamp)
+    buildlog = os.path.join(output_dir, "mbuild_mock.log_" + timestamp)
     with open(buildlog, 'w') as fd:
         fd.write(stdout)
         fd.write(stderr)
+
+
+@timer
+def handle_mock(args):
+    if not os.path.exists(args.workdir) or not os.path.isdir(args.workdir):
+        print(f"{args.workdir} is not a valid directory")
+        exit(1)
+
+    workdir = os.path.abspath(args.workdir)
+    init_logger(args)
+    logger.info(f"workdir: {workdir}")
+
+    if args.srpm:
+        if not os.path.exists(args.srpm) or not os.path.isfile(args.srpm):
+            logger.error(f"{args.srpm} is not a valid srpm file")
+            exit(1)
+        srpm_path = os.path.abspath(args.srpm)
+        mockbuild_per_srpm(args, srpm_path)
+    else:
+        srpms = glob.glob(f"{args.workdir}/*.src.rpm")
+        if not srpms:
+            logger.error(f"No src.rpm found in {args.workdir}")
+            exit(1)
+        total = len(srpms)
+        for index, srpm in enumerate(srpms):
+            srpm_path = os.path.abspath(srpm)
+            logger.info(f"[{index + 1}/{total}] build {srpm}")
+            mockbuild_per_srpm(args, srpm_path)
 
     do_sendmsg(args)
 
@@ -532,7 +544,7 @@ def main():
 
     # 添加子命令 build
     parser_build = subparsers.add_parser('build', parents=[parent_parser])
-    parser_build.add_argument('-s', '--srpm', default=None, help="build specific srpm")
+    parser_build.add_argument('-s', '--srpm', nargs="+", default=None, help="build specific srpm")
     parser_build.set_defaults(func=handle_build)
 
     # 添加子命令 localinstall
@@ -546,7 +558,7 @@ def main():
     # 添加子命令 handle_mock
     parser_mock = subparsers.add_parser('mock', parents=[parent_parser])
     parser_mock.add_argument('-r', '--root', default=None, help="specific mock config")
-    parser_mock.add_argument('-s', '--srpm', default=None, help="build specific srpm")
+    parser_mock.add_argument('-s', '--srpm', nargs="+", default=None, help="build specific srpm")
     parser_mock.set_defaults(func=handle_mock)
 
     # 添加子命令 clean
