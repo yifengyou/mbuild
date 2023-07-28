@@ -138,6 +138,19 @@ def do_exe_cmd(cmd, print_output=False, shell=False):
     return p.returncode, stdout_output, stderr_output
 
 
+def do_sendmsg(args, ret=0, stdout="", stderr=""):
+    if not args.quiet:
+        msg_sender = Wecom(key=msg_token)
+        format_msg = f"# mbuild消息播报:\n" \
+                     f"命令 : <font color=\"info\">{' '.join(sys.argv)}</font>\n" \
+                     f"返回值 : {ret}\n" \
+                     f"输出 : {stdout}\n" \
+                     f"错误 : {stderr}\n" \
+                     f"开始时间 : {timestamp}\n" \
+                     f"结束时间 : {datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
+        msg_sender.send_markdown(msg=format_msg)
+
+
 def handle_stat(args):
     pass
 
@@ -256,7 +269,7 @@ def handle_build(args):
     if not args.quiet:
         msg_sender = Wecom(key=msg_token)
         format_msg = f"# mbuild消息播报:\n" \
-                     f"命令 : <font color=\"warning\">{' '.join(sys.argv)}</font>\n" \
+                     f"命令 : <font color=\"info\">{' '.join(sys.argv)}</font>\n" \
                      f"开始时间 : {timestamp}\n" \
                      f"结束时间 : {datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
         msg_sender.send_markdown(msg=format_msg)
@@ -305,6 +318,11 @@ def handle_localinstall(args):
 
 @timer
 def handle_localbuild(args):
+    """
+    编译指定目录
+    :param args:
+    :return:
+    """
     if not os.path.exists(args.workdir) or not os.path.isdir(args.workdir):
         print(f"{args.workdir} is not a valid directory")
         exit(1)
@@ -313,11 +331,12 @@ def handle_localbuild(args):
     init_logger(args)
     logger.info(f"workdir: {workdir}")
 
+    # 检查工作目录是否为rpmbuild目录（包含SOURCES、SPECS）
     if not os.path.exists(os.path.join(workdir, "SOURCES")) or not os.path.exists(os.path.join(workdir, "SPECS")):
         logger.error(f"No SOURCES or SPECS dir found in {workdir}")
         return
 
-    # 检查spec
+    # 检查spec，获取SPEC绝对路径spec
     specs = glob.glob(f"{workdir}/SPECS/*.spec")
     if len(specs) == 0:
         logger.error(f"no specs found!")
@@ -327,6 +346,33 @@ def handle_localbuild(args):
         return
     spec = os.path.abspath(specs[0])
     logger.info(f"using spec {spec}")
+
+    # 导出rpm -qa记录
+    ret, stdout, stderr = do_exe_cmd(["rpm", "-qa"], print_output=False)
+    if ret != 0:
+        # logger.error(f" query all rpm failed! [{ret}] {stderr}")
+        errorlog = os.path.join(workdir, "mbuild_rpmqa_err.log_" + timestamp)
+        with open(errorlog, 'w') as fd:
+            fd.write(stdout)
+            fd.write(stderr)
+        return
+    rpm_manifest = os.path.join(workdir, "mbuild_rpm-manifest_" + timestamp)
+    with open(rpm_manifest, 'w') as fd:
+        fd.write(stdout)
+
+    # 安裝依赖
+    ret, stdout, stderr = do_exe_cmd(["yum", "builddep", "-y", spec], print_output=True)
+    if ret != 0:
+        # logger.error(f" yum builddep failed! [{ret}] {stderr}")
+        errorlog = os.path.join(workdir, "mbuild_builddep_err.log_" + timestamp)
+        with open(errorlog, 'w') as fd:
+            fd.write(stdout)
+            fd.write(stderr)
+        return
+    buildlog = os.path.join(workdir, "mbuild_builddep.log_" + timestamp)
+    with open(buildlog, 'w') as fd:
+        fd.write(stdout)
+        fd.write(stderr)
 
     # rpmbuild编译
     ret, stdout, stderr = do_exe_cmd(
@@ -343,11 +389,12 @@ def handle_localbuild(args):
     buildlog = os.path.join(workdir, "mbuild_rpmbuild.log_" + timestamp)
     with open(buildlog, 'w') as fd:
         fd.write(stdout)
+        fd.write(stderr)
 
     if not args.quiet:
         msg_sender = Wecom(key=msg_token)
         format_msg = f"# mbuild消息播报:\n" \
-                     f"命令 : <font color=\"warning\">{' '.join(sys.argv)}</font>\n" \
+                     f"命令 : <font color=\"info\">{' '.join(sys.argv)}</font>\n" \
                      f"开始时间 : {timestamp}\n" \
                      f"结束时间 : {datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
         msg_sender.send_markdown(msg=format_msg)
@@ -397,7 +444,9 @@ def handle_mock(args):
         # 获取srpm名称 N-V-R
         ret, srpm_name, stderr = do_exe_cmd(["rpm", "-qp", "--queryformat", "%{NAME}", srpm_path], print_output=True)
         if ret != 0:
-            logger.error(f" query srpm file ret is not zero [{ret}] {stderr}")
+            msg = f" query srpm file ret is not zero [{ret}] {stderr}"
+            logger.error(msg)
+            do_sendmsg(args, ret=-1, stderr=msg)
             return
         srpm_name = srpm_name.strip()
         logger.info(f"srpm name : [{srpm_name}]")
@@ -412,7 +461,9 @@ def handle_mock(args):
         try:
             os.makedirs(args.output, exist_ok=True)
         except Exception as e:
-            logger.error(f"failed to create {args.output}")
+            msg = f"failed to create {args.output}"
+            logger.error(msg)
+            do_sendmsg(args, ret=-1, stderr=msg)
             exit(1)
         output_dir = args.output
 
@@ -436,18 +487,14 @@ def handle_mock(args):
         with open(errorlog, 'w') as fd:
             fd.write(stdout)
             fd.write(stderr)
+        do_sendmsg(args, ret=ret)
         return
     buildlog = os.path.join(workdir, "mbuild_mock.log_" + timestamp)
     with open(buildlog, 'w') as fd:
         fd.write(stdout)
+        fd.write(stderr)
 
-    if not args.quiet:
-        msg_sender = Wecom(key=msg_token)
-        format_msg = f"# mbuild消息播报:\n" \
-                     f"命令 : <font color=\"warning\">{' '.join(sys.argv)}</font>\n" \
-                     f"开始时间 : {timestamp}\n" \
-                     f"结束时间 : {datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
-        msg_sender.send_markdown(msg=format_msg)
+    do_sendmsg(args)
 
 
 def main():
@@ -468,10 +515,7 @@ def main():
     parent_parser.add_argument("-j", "--job", default=os.cpu_count(), type=int, help="job count")
     parent_parser.add_argument("-o", "--output", default=None, help="output dir path")
     parent_parser.add_argument("-w", "--workdir", default=".", help="setup workdir")
-    parent_parser.add_argument('-l', '--log', default=None, help="log file path")
     parent_parser.add_argument('-d', '--debug', default=None, action="store_true", help="enable debug output")
-    parent_parser.add_argument('-s', '--srpm', default=None, help="build specific srpm")
-    parent_parser.add_argument('-r', '--root', default=None, help="specific mock config")
     parent_parser.add_argument('-q', '--quiet', default=False, action="store_true", help="keep quiet, no msg send")
 
     # 添加子命令 stat
@@ -480,6 +524,7 @@ def main():
 
     # 添加子命令 build
     parser_build = subparsers.add_parser('build', parents=[parent_parser])
+    parser_build.add_argument('-s', '--srpm', default=None, help="build specific srpm")
     parser_build.set_defaults(func=handle_build)
 
     # 添加子命令 localinstall
@@ -492,6 +537,8 @@ def main():
 
     # 添加子命令 handle_mock
     parser_mock = subparsers.add_parser('mock', parents=[parent_parser])
+    parser_mock.add_argument('-r', '--root', default=None, help="specific mock config")
+    parser_mock.add_argument('-s', '--srpm', default=None, help="build specific srpm")
     parser_mock.set_defaults(func=handle_mock)
 
     # 添加子命令 clean
