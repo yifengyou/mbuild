@@ -253,12 +253,15 @@ def handle_build(args):
     init_logger(args)
     logger.info(f"workdir: {workdir}")
 
-    if args.srpm:
-        if not os.path.exists(args.srpm) or not os.path.isfile(args.srpm):
-            logger.error(f"{args.srpm} is not a valid srpm file")
-            exit(1)
-        srpm_path = os.path.abspath(args.srpm)
-        rpmbuild_per_srpm(srpm_path)
+    if args.srpm and len(args.srpm) > 0:
+        total = len(args.srpm)
+        for index, srpm in enumerate(args.srpm):
+            if not os.path.exists(srpm) or not os.path.isfile(srpm):
+                logger.error(f"{srpm} is not a valid srpm file")
+                exit(1)
+            srpm_path = os.path.abspath(srpm)
+            logger.info(f"[{index + 1}/{total}] build {srpm}")
+            rpmbuild_per_srpm(srpm_path)
     else:
         srpms = glob.glob(f"{args.workdir}/*.src.rpm")
         if not srpms:
@@ -469,7 +472,7 @@ def mockbuild_per_srpm(args, srpm):
         "--root", f"{root}",
         "--rebuild", f"{srpm_path}",
         "--resultdir", f"{output_dir}",
-        "--verbose", "--trace"
+        "--verbose"
     ]
     logger.info(f"run cmd {' '.join(cmd)}")
     ret, stdout, stderr = do_exe_cmd(cmd, print_output=True, shell=False)
@@ -515,6 +518,31 @@ def handle_mock(args):
             mockbuild_per_srpm(args, srpm_path)
 
     do_sendmsg(args)
+
+
+def handle_check(args):
+    if not os.path.exists(args.workdir) or not os.path.isdir(args.workdir):
+        print(f"{args.workdir} is not a valid directory")
+        exit(1)
+
+    workdir = os.path.abspath(args.workdir)
+    print(f"workdir: {workdir}")
+
+    def find_rpm_files(dir_path):
+        flag = False
+        rpms = []
+        for entry in os.scandir(dir_path):
+            if entry.is_file() and entry.name.endswith(".rpm"):
+                flag = True
+                rpms.append(os.path.basename(entry.path))
+            elif entry.is_dir():
+                find_rpm_files(entry.path)
+        if flag:
+            print(f"[+] {os.path.abspath(dir_path)}")
+            for r in rpms:
+                print(f"\t[-] {r}")
+
+    find_rpm_files(workdir)
 
 
 def main():
@@ -564,6 +592,10 @@ def main():
     # 添加子命令 clean
     parser_clean = subparsers.add_parser('clean', parents=[parent_parser])
     parser_clean.set_defaults(func=handle_clean)
+
+    # 添加子命令 check
+    parser_check = subparsers.add_parser('check', parents=[parent_parser])
+    parser_check.set_defaults(func=handle_check)
 
     # 开始解析命令
     args = parser.parse_args()
